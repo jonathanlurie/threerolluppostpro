@@ -30,10 +30,10 @@
     "rollup-plugin-node-resolve": "^3.0.0",
     "rollup-plugin-terser": "^3.0.0",
     "rollup-plugin-uglify": "^6.0.0",
-    "serve": "^10.0.2"
+    "serve": "^10.1.1"
   },
   "dependencies": {
-    "three": "^0.96.0"
+    "three": "^0.100.0"
   },
   "eslintConfig": {
     "extends": "eslint-config-airbnb-base",
