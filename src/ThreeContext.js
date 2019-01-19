@@ -3,6 +3,10 @@ import TrackballControls from './thirdparty/TrackballControls'
 // import Tools from './Tools'
 import EventManager from './EventManager'
 
+import UnrealBloomPass from './bloom/UnrealBloomPass'
+import EffectComposer from './bloom/EffectComposer'
+import RenderPass from './bloom/RenderPass'
+
 /**
  * ThreeContext creates a WebGL context using THREEjs. It also handle mouse control.
  * An event can be associated to a ThreeContext instance: `onRaycast` with the method
@@ -22,6 +26,8 @@ export class ThreeContext extends EventManager {
       console.error('The ThreeContext needs a div object')
       return
     }
+
+    this._divObj = divObj
 
     this._requestFrameId = null
 
@@ -52,6 +58,15 @@ export class ThreeContext extends EventManager {
     this._renderer.gammaOutput = true
     divObj.appendChild(this._renderer.domElement)
 
+    // Necessqry for bloom
+    this._composer = new EffectComposer( this._renderer )
+    this._composer.setSize( divObj.clientWidth, divObj.clientHeight )
+
+    let renderScene = new RenderPass( this._scene, this._camera )
+    this._composer.addPass( renderScene )
+
+    this.addBloom()
+
     // all the necessary for raycasting
     this._raycaster = new THREE.Raycaster()
     this._raycastMouse = new THREE.Vector2()
@@ -73,19 +88,41 @@ export class ThreeContext extends EventManager {
     // mouse controls
     this._controls = new TrackballControls(this._camera, this._renderer.domElement)
     this._controls.rotateSpeed = 3
-    this._controls.addEventListener('change', this._render.bind(this))
+    //this._controls.addEventListener('change', this._render.bind(this))
 
     window.addEventListener('resize', () => {
       that._camera.aspect = divObj.clientWidth / divObj.clientHeight
       that._camera.updateProjectionMatrix()
       that._renderer.setSize(divObj.clientWidth, divObj.clientHeight)
+      that._composer.setSize(divObj.clientWidth, divObj.clientHeight)
       that._controls.handleResize()
-      that._render()
+      //that._render()
+      that._composer.render()
     }, false)
 
-    this._render()
+    //this._render()
     this._animate()
   }
+
+
+  addBloom() {
+    let params = {
+        exposure: 1,
+        bloomStrength: 1.5,
+        bloomThreshold: 0,
+        bloomRadius: 0
+      }
+
+    let bloomPass = new UnrealBloomPass( new THREE.Vector2( this._divObj.clientWidth, this._divObj.clientHeight ), 1.5, 0.4, 0.85 )
+    bloomPass.renderToScreen = true
+    bloomPass.threshold = params.bloomThreshold
+    bloomPass.strength = params.bloomStrength
+    bloomPass.radius = params.bloomRadius
+    console.log(bloomPass)
+
+    this._composer.addPass( bloomPass )
+  }
+
 
 
   /**
@@ -93,7 +130,11 @@ export class ThreeContext extends EventManager {
    */
   addSampleShape() {
     const geometry = new THREE.TorusKnotBufferGeometry(10, 3, 100, 16)
-    const material = new THREE.MeshPhongMaterial({ color: Math.ceil(Math.random() * 0xffff00) })
+    const material = new THREE.MeshPhongMaterial({
+      color: Math.ceil(Math.random() * 0xffff00),
+      wireframeLinewidth: 12,
+      wireframe: true
+    })
     const torusKnot = new THREE.Mesh(geometry, material)
     this._scene.add(torusKnot)
     this._render()
@@ -136,6 +177,7 @@ export class ThreeContext extends EventManager {
   _animate() {
     this._requestFrameId = requestAnimationFrame(this._animate.bind(this))
     this._controls.update()
+    this._render()
   }
 
 
@@ -144,7 +186,8 @@ export class ThreeContext extends EventManager {
    * Render the scene
    */
   _render() {
-    this._renderer.render(this._scene, this._camera)
+    //this._renderer.render(this._scene, this._camera)
+    this._composer.render()
   }
 
 
