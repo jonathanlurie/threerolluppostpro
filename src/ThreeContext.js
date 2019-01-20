@@ -3,9 +3,23 @@ import TrackballControls from './thirdparty/TrackballControls'
 // import Tools from './Tools'
 import EventManager from './EventManager'
 
-import UnrealBloomPass from './bloom/UnrealBloomPass'
-import EffectComposer from './bloom/EffectComposer'
-import RenderPass from './bloom/RenderPass'
+// common for postprocessing
+import EffectComposer from './postprocessing/base/EffectComposer'
+import RenderPass from './postprocessing/base/RenderPass'
+import ShaderPass from './postprocessing/base/ShaderPass'
+
+// specific postprocessing for Bloom
+import UnrealBloomPass from './postprocessing/unrealBloom/UnrealBloomPass'
+
+// specific for postprocessing Sobel
+import LuminosityShader from './postprocessing/sobel/LuminosityShader'
+import SobelOperatorShader from './postprocessing/sobel/SobelOperatorShader'
+
+// specific for the noChange shader (test)
+import NoChange from './postprocessing/noChange/NoChange'
+
+// specifi for the PixelShader
+import PixelShader from './postprocessing/PixelShader/PixelShader'
 
 /**
  * ThreeContext creates a WebGL context using THREEjs. It also handle mouse control.
@@ -65,7 +79,18 @@ export class ThreeContext extends EventManager {
     let renderScene = new RenderPass( this._scene, this._camera )
     this._composer.addPass( renderScene )
 
-    this.addBloom()
+    // Adding some postprocessings:
+    // A. UnrealBloom
+    //this.addBloom()
+
+    // B. Sobel operator
+    //this.addSobel()
+
+    // C. NoChange
+    this.addNoChange()
+
+    // D. PixelShader
+    //this.addPixelShader()
 
     // all the necessary for raycasting
     this._raycaster = new THREE.Raycaster()
@@ -124,6 +149,33 @@ export class ThreeContext extends EventManager {
   }
 
 
+  addSobel() {
+    let effectGrayScale = new ShaderPass( LuminosityShader )
+    this._composer.addPass( effectGrayScale )
+
+    let effectSobel = new ShaderPass( SobelOperatorShader );
+    effectSobel.renderToScreen = true;
+    effectSobel.uniforms.resolution.value.x = window.innerWidth;
+    effectSobel.uniforms.resolution.value.y = window.innerHeight;
+    this._composer.addPass( effectSobel );
+  }
+
+
+  addNoChange() {
+    let noChange = new ShaderPass( NoChange )
+    noChange.renderToScreen = true
+    this._composer.addPass( noChange )
+  }
+
+  addPixelShader() {
+    let pixelPass = new ShaderPass( PixelShader );
+    pixelPass.uniforms.resolution.value = new THREE.Vector2( this._divObj.clientWidth, this._divObj.clientHeight )
+    pixelPass.uniforms.resolution.value.multiplyScalar( window.devicePixelRatio )
+    pixelPass.renderToScreen = true
+    pixelPass.uniforms.pixelSize.value = 10
+    this._composer.addPass( pixelPass )
+  }
+
 
   /**
    * Adds a Thorus knot to the scene
@@ -132,8 +184,8 @@ export class ThreeContext extends EventManager {
     const geometry = new THREE.TorusKnotBufferGeometry(10, 3, 100, 16)
     const material = new THREE.MeshPhongMaterial({
       color: Math.ceil(Math.random() * 0xffff00),
-      wireframeLinewidth: 12,
-      wireframe: true
+      //wireframeLinewidth: 12,
+      //wireframe: true
     })
     const torusKnot = new THREE.Mesh(geometry, material)
     this._scene.add(torusKnot)

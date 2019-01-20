@@ -1,4 +1,4 @@
-import { PerspectiveCamera, Scene, AmbientLight, DirectionalLight, WebGLRenderer, Raycaster, Vector2, TorusKnotBufferGeometry, MeshPhongMaterial, Mesh, Vector3, Quaternion, EventDispatcher, Color, LinearFilter, RGBAFormat, WebGLRenderTarget, UniformsUtils, ShaderMaterial, AdditiveBlending, OrthographicCamera, MeshBasicMaterial, PlaneBufferGeometry } from 'three';
+import { PerspectiveCamera, Scene, AmbientLight, DirectionalLight, WebGLRenderer, Raycaster, Vector2, TorusKnotBufferGeometry, MeshPhongMaterial, Mesh, Vector3, Quaternion, EventDispatcher, LinearFilter, RGBAFormat, WebGLRenderTarget, ShaderMaterial, UniformsUtils, OrthographicCamera, PlaneBufferGeometry, Color, AdditiveBlending, MeshBasicMaterial } from 'three';
 
 /*
  * @author Eberhard Graether / http://egraether.com/
@@ -595,6 +595,474 @@ class EventManager {
   }
 }
 
+const Pass = function () {
+
+	// if set to true, the pass is processed by the composer
+	this.enabled = true;
+
+	// if set to true, the pass indicates to swap read and write buffer after rendering
+	this.needsSwap = true;
+
+	// if set to true, the pass clears its buffer before rendering
+	this.clear = false;
+
+	// if set to true, the result of the pass is rendered to screen
+	this.renderToScreen = false;
+
+};
+
+Object.assign( Pass.prototype, {
+
+	setSize: function ( width, height ) {},
+
+	render: function ( renderer, writeBuffer, readBuffer, delta, maskActive ) {
+
+		console.error( 'Pass: .render() must be implemented in derived pass.' );
+
+	}
+
+} );
+
+/**
+ * @author alteredq / http://alteredqualia.com/
+ */
+
+const MaskPass = function ( scene, camera ) {
+
+	Pass.call( this );
+
+	this.scene = scene;
+	this.camera = camera;
+
+	this.clear = true;
+	this.needsSwap = false;
+
+	this.inverse = false;
+
+};
+
+MaskPass.prototype = Object.assign( Object.create( Pass.prototype ), {
+
+	constructor: MaskPass,
+
+	render: function ( renderer, writeBuffer, readBuffer, delta, maskActive ) {
+
+		var context = renderer.context;
+		var state = renderer.state;
+
+		// don't update color or depth
+
+		state.buffers.color.setMask( false );
+		state.buffers.depth.setMask( false );
+
+		// lock buffers
+
+		state.buffers.color.setLocked( true );
+		state.buffers.depth.setLocked( true );
+
+		// set up stencil
+
+		var writeValue, clearValue;
+
+		if ( this.inverse ) {
+
+			writeValue = 0;
+			clearValue = 1;
+
+		} else {
+
+			writeValue = 1;
+			clearValue = 0;
+
+		}
+
+		state.buffers.stencil.setTest( true );
+		state.buffers.stencil.setOp( context.REPLACE, context.REPLACE, context.REPLACE );
+		state.buffers.stencil.setFunc( context.ALWAYS, writeValue, 0xffffffff );
+		state.buffers.stencil.setClear( clearValue );
+
+		// draw into the stencil buffer
+
+		renderer.render( this.scene, this.camera, readBuffer, this.clear );
+		renderer.render( this.scene, this.camera, writeBuffer, this.clear );
+
+		// unlock color and depth buffer for subsequent rendering
+
+		state.buffers.color.setLocked( false );
+		state.buffers.depth.setLocked( false );
+
+		// only render where stencil is set to 1
+
+		state.buffers.stencil.setFunc( context.EQUAL, 1, 0xffffffff );  // draw if == 1
+		state.buffers.stencil.setOp( context.KEEP, context.KEEP, context.KEEP );
+
+	}
+
+} );
+
+
+const ClearMaskPass = function () {
+
+	Pass.call( this );
+
+	this.needsSwap = false;
+
+};
+
+ClearMaskPass.prototype = Object.create( Pass.prototype );
+
+Object.assign( ClearMaskPass.prototype, {
+
+	render: function ( renderer, writeBuffer, readBuffer, delta, maskActive ) {
+
+		renderer.state.buffers.stencil.setTest( false );
+
+	}
+
+} );
+
+/**
+ * @author alteredq / http://alteredqualia.com/
+ */
+
+const ShaderPass = function ( shader, textureID ) {
+
+	Pass.call( this );
+
+	this.textureID = ( textureID !== undefined ) ? textureID : "tDiffuse";
+
+	if ( shader instanceof ShaderMaterial ) {
+
+		this.uniforms = shader.uniforms;
+
+		this.material = shader;
+
+	} else if ( shader ) {
+
+		this.uniforms = UniformsUtils.clone( shader.uniforms );
+
+		this.material = new ShaderMaterial( {
+
+			defines: Object.assign( {}, shader.defines ),
+			uniforms: this.uniforms,
+			vertexShader: shader.vertexShader,
+			fragmentShader: shader.fragmentShader
+
+		} );
+
+	}
+
+	this.camera = new OrthographicCamera( - 1, 1, 1, - 1, 0, 1 );
+	this.scene = new Scene();
+
+	this.quad = new Mesh( new PlaneBufferGeometry( 2, 2 ), null );
+	this.quad.frustumCulled = false; // Avoid getting clipped
+	this.scene.add( this.quad );
+
+};
+
+ShaderPass.prototype = Object.assign( Object.create( Pass.prototype ), {
+
+	constructor: ShaderPass,
+
+	render: function( renderer, writeBuffer, readBuffer, delta, maskActive ) {
+
+		if ( this.uniforms[ this.textureID ] ) {
+
+			this.uniforms[ this.textureID ].value = readBuffer.texture;
+
+		}
+
+		this.quad.material = this.material;
+
+		if ( this.renderToScreen ) {
+
+			renderer.render( this.scene, this.camera );
+
+		} else {
+
+			renderer.render( this.scene, this.camera, writeBuffer, this.clear );
+
+		}
+
+	}
+
+} );
+
+/**
+ * @author alteredq / http://alteredqualia.com/
+ *
+ * Full-screen textured quad shader
+ */
+
+const CopyShader = {
+
+	uniforms: {
+
+		"tDiffuse": { value: null },
+		"opacity":  { value: 1.0 }
+
+	},
+
+	vertexShader: [
+
+		"varying vec2 vUv;",
+
+		"void main() {",
+
+			"vUv = uv;",
+			"gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );",
+
+		"}"
+
+	].join( "\n" ),
+
+	fragmentShader: [
+
+		"uniform float opacity;",
+
+		"uniform sampler2D tDiffuse;",
+
+		"varying vec2 vUv;",
+
+		"void main() {",
+
+			"vec4 texel = texture2D( tDiffuse, vUv );",
+			"gl_FragColor = opacity * texel;",
+
+		"}"
+
+	].join( "\n" )
+
+};
+
+/**
+ * @author alteredq / http://alteredqualia.com/
+ */
+
+const EffectComposer = function ( renderer, renderTarget ) {
+
+	this.renderer = renderer;
+
+	if ( renderTarget === undefined ) {
+
+		var parameters = {
+			minFilter: LinearFilter,
+			magFilter: LinearFilter,
+			format: RGBAFormat,
+			stencilBuffer: false
+		};
+
+		var size = renderer.getDrawingBufferSize();
+		renderTarget = new WebGLRenderTarget( size.width, size.height, parameters );
+		renderTarget.texture.name = 'EffectComposer.rt1';
+
+	}
+
+	this.renderTarget1 = renderTarget;
+	this.renderTarget2 = renderTarget.clone();
+	this.renderTarget2.texture.name = 'EffectComposer.rt2';
+
+	this.writeBuffer = this.renderTarget1;
+	this.readBuffer = this.renderTarget2;
+
+	this.passes = [];
+
+	// dependencies
+
+	if ( CopyShader === undefined ) {
+
+		console.error( 'EffectComposer relies on CopyShader' );
+
+	}
+
+	if ( ShaderPass === undefined ) {
+
+		console.error( 'EffectComposer relies on ShaderPass' );
+
+	}
+
+	this.copyPass = new ShaderPass( CopyShader );
+
+};
+
+Object.assign( EffectComposer.prototype, {
+
+	swapBuffers: function () {
+
+		var tmp = this.readBuffer;
+		this.readBuffer = this.writeBuffer;
+		this.writeBuffer = tmp;
+
+	},
+
+	addPass: function ( pass ) {
+
+		this.passes.push( pass );
+
+		var size = this.renderer.getDrawingBufferSize();
+		pass.setSize( size.width, size.height );
+
+	},
+
+	insertPass: function ( pass, index ) {
+
+		this.passes.splice( index, 0, pass );
+
+	},
+
+	render: function ( delta ) {
+
+		var maskActive = false;
+
+		var pass, i, il = this.passes.length;
+
+		for ( i = 0; i < il; i ++ ) {
+
+			pass = this.passes[ i ];
+
+			if ( pass.enabled === false ) continue;
+
+			pass.render( this.renderer, this.writeBuffer, this.readBuffer, delta, maskActive );
+
+			if ( pass.needsSwap ) {
+
+				if ( maskActive ) {
+
+					var context = this.renderer.context;
+
+					context.stencilFunc( context.NOTEQUAL, 1, 0xffffffff );
+
+					this.copyPass.render( this.renderer, this.writeBuffer, this.readBuffer, delta );
+
+					context.stencilFunc( context.EQUAL, 1, 0xffffffff );
+
+				}
+
+				this.swapBuffers();
+
+			}
+
+      
+			if ( MaskPass !== undefined ) {
+
+				if ( pass instanceof MaskPass ) {
+
+					maskActive = true;
+
+				} else if ( pass instanceof ClearMaskPass ) {
+
+					maskActive = false;
+
+				}
+
+			}
+
+
+		}
+
+	},
+
+	reset: function ( renderTarget ) {
+
+		if ( renderTarget === undefined ) {
+
+			var size = this.renderer.getDrawingBufferSize();
+
+			renderTarget = this.renderTarget1.clone();
+			renderTarget.setSize( size.width, size.height );
+
+		}
+
+		this.renderTarget1.dispose();
+		this.renderTarget2.dispose();
+		this.renderTarget1 = renderTarget;
+		this.renderTarget2 = renderTarget.clone();
+
+		this.writeBuffer = this.renderTarget1;
+		this.readBuffer = this.renderTarget2;
+
+	},
+
+	setSize: function ( width, height ) {
+
+		this.renderTarget1.setSize( width, height );
+		this.renderTarget2.setSize( width, height );
+
+		for ( var i = 0; i < this.passes.length; i ++ ) {
+
+			this.passes[ i ].setSize( width, height );
+
+		}
+
+	}
+
+} );
+
+/**
+ * @author alteredq / http://alteredqualia.com/
+ */
+
+const RenderPass = function ( scene, camera, overrideMaterial, clearColor, clearAlpha ) {
+
+	Pass.call( this );
+
+	this.scene = scene;
+	this.camera = camera;
+
+	this.overrideMaterial = overrideMaterial;
+
+	this.clearColor = clearColor;
+	this.clearAlpha = ( clearAlpha !== undefined ) ? clearAlpha : 0;
+
+	this.clear = true;
+	this.clearDepth = false;
+	this.needsSwap = false;
+
+};
+
+RenderPass.prototype = Object.assign( Object.create( Pass.prototype ), {
+
+	constructor: RenderPass,
+
+	render: function ( renderer, writeBuffer, readBuffer, delta, maskActive ) {
+
+		var oldAutoClear = renderer.autoClear;
+		renderer.autoClear = false;
+
+		this.scene.overrideMaterial = this.overrideMaterial;
+
+		var oldClearColor, oldClearAlpha;
+
+		if ( this.clearColor ) {
+
+			oldClearColor = renderer.getClearColor().getHex();
+			oldClearAlpha = renderer.getClearAlpha();
+
+			renderer.setClearColor( this.clearColor, this.clearAlpha );
+
+		}
+
+		if ( this.clearDepth ) {
+
+			renderer.clearDepth();
+
+		}
+
+		renderer.render( this.scene, this.camera, this.renderToScreen ? null : readBuffer, this.clear );
+
+		if ( this.clearColor ) {
+
+			renderer.setClearColor( oldClearColor, oldClearAlpha );
+
+		}
+
+		this.scene.overrideMaterial = null;
+		renderer.autoClear = oldAutoClear;
+	}
+
+} );
+
 /**
  * @author bhouston / http://clara.io/
  *
@@ -659,81 +1127,6 @@ const LuminosityHighPassShader = {
 	].join("\n")
 
 };
-
-/**
- * @author alteredq / http://alteredqualia.com/
- *
- * Full-screen textured quad shader
- */
-
-const CopyShader = {
-
-	uniforms: {
-
-		"tDiffuse": { value: null },
-		"opacity":  { value: 1.0 }
-
-	},
-
-	vertexShader: [
-
-		"varying vec2 vUv;",
-
-		"void main() {",
-
-			"vUv = uv;",
-			"gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );",
-
-		"}"
-
-	].join( "\n" ),
-
-	fragmentShader: [
-
-		"uniform float opacity;",
-
-		"uniform sampler2D tDiffuse;",
-
-		"varying vec2 vUv;",
-
-		"void main() {",
-
-			"vec4 texel = texture2D( tDiffuse, vUv );",
-			"gl_FragColor = opacity * texel;",
-
-		"}"
-
-	].join( "\n" )
-
-};
-
-const Pass = function () {
-
-	// if set to true, the pass is processed by the composer
-	this.enabled = true;
-
-	// if set to true, the pass indicates to swap read and write buffer after rendering
-	this.needsSwap = true;
-
-	// if set to true, the pass clears its buffer before rendering
-	this.clear = false;
-
-	// if set to true, the result of the pass is rendered to screen
-	this.renderToScreen = false;
-
-};
-
-Object.assign( Pass.prototype, {
-
-	setSize: function ( width, height ) {},
-
-	render: function ( renderer, writeBuffer, readBuffer, delta, maskActive ) {
-
-		console.error( 'Pass: .render() must be implemented in derived pass.' );
-
-	}
-
-} );
 
 /**
  * @author spidersharma / http://eduperiment.com/
@@ -1123,394 +1516,227 @@ UnrealBloomPass.BlurDirectionY = new Vector2( 0.0, 1.0 );
 
 /**
  * @author alteredq / http://alteredqualia.com/
+ *
+ * Luminosity
+ * http://en.wikipedia.org/wiki/Luminosity
  */
 
-const MaskPass = function ( scene, camera ) {
+const LuminosityShader = {
 
-	Pass.call( this );
+	uniforms: {
 
-	this.scene = scene;
-	this.camera = camera;
+		"tDiffuse": { value: null }
 
-	this.clear = true;
-	this.needsSwap = false;
+	},
 
-	this.inverse = false;
+	vertexShader: [
 
-};
+		"varying vec2 vUv;",
 
-MaskPass.prototype = Object.assign( Object.create( Pass.prototype ), {
+		"void main() {",
 
-	constructor: MaskPass,
+			"vUv = uv;",
 
-	render: function ( renderer, writeBuffer, readBuffer, delta, maskActive ) {
+			"gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );",
 
-		var context = renderer.context;
-		var state = renderer.state;
+		"}"
 
-		// don't update color or depth
+	].join( "\n" ),
 
-		state.buffers.color.setMask( false );
-		state.buffers.depth.setMask( false );
+	fragmentShader: [
 
-		// lock buffers
+		"#include <common>",
 
-		state.buffers.color.setLocked( true );
-		state.buffers.depth.setLocked( true );
+		"uniform sampler2D tDiffuse;",
 
-		// set up stencil
+		"varying vec2 vUv;",
 
-		var writeValue, clearValue;
+		"void main() {",
 
-		if ( this.inverse ) {
+			"vec4 texel = texture2D( tDiffuse, vUv );",
 
-			writeValue = 0;
-			clearValue = 1;
+			"float l = linearToRelativeLuminance( texel.rgb );",
 
-		} else {
+			"gl_FragColor = vec4( l, l, l, texel.w );",
 
-			writeValue = 1;
-			clearValue = 0;
+		"}"
 
-		}
-
-		state.buffers.stencil.setTest( true );
-		state.buffers.stencil.setOp( context.REPLACE, context.REPLACE, context.REPLACE );
-		state.buffers.stencil.setFunc( context.ALWAYS, writeValue, 0xffffffff );
-		state.buffers.stencil.setClear( clearValue );
-
-		// draw into the stencil buffer
-
-		renderer.render( this.scene, this.camera, readBuffer, this.clear );
-		renderer.render( this.scene, this.camera, writeBuffer, this.clear );
-
-		// unlock color and depth buffer for subsequent rendering
-
-		state.buffers.color.setLocked( false );
-		state.buffers.depth.setLocked( false );
-
-		// only render where stencil is set to 1
-
-		state.buffers.stencil.setFunc( context.EQUAL, 1, 0xffffffff );  // draw if == 1
-		state.buffers.stencil.setOp( context.KEEP, context.KEEP, context.KEEP );
-
-	}
-
-} );
-
-
-const ClearMaskPass = function () {
-
-	Pass.call( this );
-
-	this.needsSwap = false;
+	].join( "\n" )
 
 };
-
-ClearMaskPass.prototype = Object.create( Pass.prototype );
-
-Object.assign( ClearMaskPass.prototype, {
-
-	render: function ( renderer, writeBuffer, readBuffer, delta, maskActive ) {
-
-		renderer.state.buffers.stencil.setTest( false );
-
-	}
-
-} );
 
 /**
- * @author alteredq / http://alteredqualia.com/
+ * @author Mugen87 / https://github.com/Mugen87
+ *
+ * Sobel Edge Detection (see https://youtu.be/uihBwtPIBxM)
+ *
+ * As mentioned in the video the Sobel operator expects a grayscale image as input.
+ *
  */
 
-const ShaderPass = function ( shader, textureID ) {
+const SobelOperatorShader = {
 
-	Pass.call( this );
+	uniforms: {
 
-	this.textureID = ( textureID !== undefined ) ? textureID : "tDiffuse";
+		"tDiffuse": { value: null },
+		"resolution": { value: new Vector2() }
 
-	if ( shader instanceof ShaderMaterial ) {
+	},
 
-		this.uniforms = shader.uniforms;
+	vertexShader: [
 
-		this.material = shader;
+		"varying vec2 vUv;",
 
-	} else if ( shader ) {
+		"void main() {",
 
-		this.uniforms = UniformsUtils.clone( shader.uniforms );
+			"vUv = uv;",
 
-		this.material = new ShaderMaterial( {
+			"gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );",
 
-			defines: Object.assign( {}, shader.defines ),
-			uniforms: this.uniforms,
-			vertexShader: shader.vertexShader,
-			fragmentShader: shader.fragmentShader
+		"}"
 
-		} );
+	].join( "\n" ),
 
-	}
+	fragmentShader: [
 
-	this.camera = new OrthographicCamera( - 1, 1, 1, - 1, 0, 1 );
-	this.scene = new Scene();
+		"uniform sampler2D tDiffuse;",
+		"uniform vec2 resolution;",
+		"varying vec2 vUv;",
 
-	this.quad = new Mesh( new PlaneBufferGeometry( 2, 2 ), null );
-	this.quad.frustumCulled = false; // Avoid getting clipped
-	this.scene.add( this.quad );
+		"void main() {",
+
+			"vec2 texel = vec2( 1.0 / resolution.x, 1.0 / resolution.y );",
+
+			// kernel definition (in glsl matrices are filled in column-major order)
+
+			"const mat3 Gx = mat3( -1, -2, -1, 0, 0, 0, 1, 2, 1 );", // x direction kernel
+			"const mat3 Gy = mat3( -1, 0, 1, -2, 0, 2, -1, 0, 1 );", // y direction kernel
+
+			// fetch the 3x3 neighbourhood of a fragment
+
+			// first column
+
+			"float tx0y0 = texture2D( tDiffuse, vUv + texel * vec2( -1, -1 ) ).r;",
+			"float tx0y1 = texture2D( tDiffuse, vUv + texel * vec2( -1,  0 ) ).r;",
+			"float tx0y2 = texture2D( tDiffuse, vUv + texel * vec2( -1,  1 ) ).r;",
+
+			// second column
+
+			"float tx1y0 = texture2D( tDiffuse, vUv + texel * vec2(  0, -1 ) ).r;",
+			"float tx1y1 = texture2D( tDiffuse, vUv + texel * vec2(  0,  0 ) ).r;",
+			"float tx1y2 = texture2D( tDiffuse, vUv + texel * vec2(  0,  1 ) ).r;",
+
+			// third column
+
+			"float tx2y0 = texture2D( tDiffuse, vUv + texel * vec2(  1, -1 ) ).r;",
+			"float tx2y1 = texture2D( tDiffuse, vUv + texel * vec2(  1,  0 ) ).r;",
+			"float tx2y2 = texture2D( tDiffuse, vUv + texel * vec2(  1,  1 ) ).r;",
+
+			// gradient value in x direction
+
+			"float valueGx = Gx[0][0] * tx0y0 + Gx[1][0] * tx1y0 + Gx[2][0] * tx2y0 + ",
+				"Gx[0][1] * tx0y1 + Gx[1][1] * tx1y1 + Gx[2][1] * tx2y1 + ",
+				"Gx[0][2] * tx0y2 + Gx[1][2] * tx1y2 + Gx[2][2] * tx2y2; ",
+
+			// gradient value in y direction
+
+			"float valueGy = Gy[0][0] * tx0y0 + Gy[1][0] * tx1y0 + Gy[2][0] * tx2y0 + ",
+				"Gy[0][1] * tx0y1 + Gy[1][1] * tx1y1 + Gy[2][1] * tx2y1 + ",
+				"Gy[0][2] * tx0y2 + Gy[1][2] * tx1y2 + Gy[2][2] * tx2y2; ",
+
+			// magnitute of the total gradient
+
+			"float G = sqrt( ( valueGx * valueGx ) + ( valueGy * valueGy ) );",
+
+			"gl_FragColor = vec4( vec3( G ), 1 );",
+
+		"}"
+
+	].join( "\n" )
 
 };
 
-ShaderPass.prototype = Object.assign( Object.create( Pass.prototype ), {
+const NoChange = {
 
-	constructor: ShaderPass,
+	uniforms: {
+		"tDiffuse": { type: "t", value: null }
+	},
 
-	render: function( renderer, writeBuffer, readBuffer, delta, maskActive ) {
+	vertexShader: [
 
-		if ( this.uniforms[ this.textureID ] ) {
+	"varying vec2 vUv;",
+	"void main() {",
+		"vUv = uv;",
+		"gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );",
 
-			this.uniforms[ this.textureID ].value = readBuffer.texture;
+	"}"
 
-		}
+	].join("\n"),
 
-		this.quad.material = this.material;
+	fragmentShader: [
 
-		if ( this.renderToScreen ) {
+	"uniform sampler2D tDiffuse;",
+	"varying vec2 vUv;",
 
-			renderer.render( this.scene, this.camera );
+	"void main() {",
 
-		} else {
+		"vec4 color = texture2D(tDiffuse, vUv);",
+		"gl_FragColor = color;",
 
-			renderer.render( this.scene, this.camera, writeBuffer, this.clear );
+	"}"
 
-		}
 
-	}
+	].join("\n")
 
-} );
+};
 
 /**
- * @author alteredq / http://alteredqualia.com/
+ * @author wongbryan / http://wongbryan.github.io
+ *
+ * Pixelation shader
  */
 
-const EffectComposer = function ( renderer, renderTarget ) {
+const PixelShader = {
 
-	this.renderer = renderer;
+	uniforms: {
 
-	if ( renderTarget === undefined ) {
+		"tDiffuse": { value: null },
+		"resolution": { value: null },
+		"pixelSize": { value: 1. },
 
-		var parameters = {
-			minFilter: LinearFilter,
-			magFilter: LinearFilter,
-			format: RGBAFormat,
-			stencilBuffer: false
-		};
+	},
 
-		var size = renderer.getDrawingBufferSize();
-		renderTarget = new WebGLRenderTarget( size.width, size.height, parameters );
-		renderTarget.texture.name = 'EffectComposer.rt1';
+	vertexShader: [
 
-	}
+		"varying highp vec2 vUv;",
 
-	this.renderTarget1 = renderTarget;
-	this.renderTarget2 = renderTarget.clone();
-	this.renderTarget2.texture.name = 'EffectComposer.rt2';
+		"void main() {",
 
-	this.writeBuffer = this.renderTarget1;
-	this.readBuffer = this.renderTarget2;
+		"vUv = uv;",
+		"gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );",
 
-	this.passes = [];
+		"}"
 
-	// dependencies
+	].join( "\n" ),
 
-	if ( CopyShader === undefined ) {
+	fragmentShader: [
 
-		console.error( 'EffectComposer relies on CopyShader' );
+		"uniform sampler2D tDiffuse;",
+		"uniform float pixelSize;",
+		"uniform vec2 resolution;",
 
-	}
+		"varying highp vec2 vUv;",
 
-	if ( ShaderPass === undefined ) {
+		"void main(){",
 
-		console.error( 'EffectComposer relies on ShaderPass' );
+		"vec2 dxy = pixelSize / resolution;",
+		"vec2 coord = dxy * floor( vUv / dxy );",
+		"gl_FragColor = texture2D(tDiffuse, coord);",
 
-	}
+		"}"
 
-	this.copyPass = new ShaderPass( CopyShader );
-
+	].join( "\n" )
 };
-
-Object.assign( EffectComposer.prototype, {
-
-	swapBuffers: function () {
-
-		var tmp = this.readBuffer;
-		this.readBuffer = this.writeBuffer;
-		this.writeBuffer = tmp;
-
-	},
-
-	addPass: function ( pass ) {
-
-		this.passes.push( pass );
-
-		var size = this.renderer.getDrawingBufferSize();
-		pass.setSize( size.width, size.height );
-
-	},
-
-	insertPass: function ( pass, index ) {
-
-		this.passes.splice( index, 0, pass );
-
-	},
-
-	render: function ( delta ) {
-
-		var maskActive = false;
-
-		var pass, i, il = this.passes.length;
-
-		for ( i = 0; i < il; i ++ ) {
-
-			pass = this.passes[ i ];
-
-			if ( pass.enabled === false ) continue;
-
-			pass.render( this.renderer, this.writeBuffer, this.readBuffer, delta, maskActive );
-
-			if ( pass.needsSwap ) {
-
-				if ( maskActive ) {
-
-					var context = this.renderer.context;
-
-					context.stencilFunc( context.NOTEQUAL, 1, 0xffffffff );
-
-					this.copyPass.render( this.renderer, this.writeBuffer, this.readBuffer, delta );
-
-					context.stencilFunc( context.EQUAL, 1, 0xffffffff );
-
-				}
-
-				this.swapBuffers();
-
-			}
-
-			if ( MaskPass !== undefined ) {
-
-				if ( pass instanceof MaskPass ) {
-
-					maskActive = true;
-
-				} else if ( pass instanceof ClearMaskPass ) {
-
-					maskActive = false;
-
-				}
-
-			}
-
-		}
-
-	},
-
-	reset: function ( renderTarget ) {
-
-		if ( renderTarget === undefined ) {
-
-			var size = this.renderer.getDrawingBufferSize();
-
-			renderTarget = this.renderTarget1.clone();
-			renderTarget.setSize( size.width, size.height );
-
-		}
-
-		this.renderTarget1.dispose();
-		this.renderTarget2.dispose();
-		this.renderTarget1 = renderTarget;
-		this.renderTarget2 = renderTarget.clone();
-
-		this.writeBuffer = this.renderTarget1;
-		this.readBuffer = this.renderTarget2;
-
-	},
-
-	setSize: function ( width, height ) {
-
-		this.renderTarget1.setSize( width, height );
-		this.renderTarget2.setSize( width, height );
-
-		for ( var i = 0; i < this.passes.length; i ++ ) {
-
-			this.passes[ i ].setSize( width, height );
-
-		}
-
-	}
-
-} );
-
-/**
- * @author alteredq / http://alteredqualia.com/
- */
-
-const RenderPass = function ( scene, camera, overrideMaterial, clearColor, clearAlpha ) {
-
-	Pass.call( this );
-
-	this.scene = scene;
-	this.camera = camera;
-
-	this.overrideMaterial = overrideMaterial;
-
-	this.clearColor = clearColor;
-	this.clearAlpha = ( clearAlpha !== undefined ) ? clearAlpha : 0;
-
-	this.clear = true;
-	this.clearDepth = false;
-	this.needsSwap = false;
-
-};
-
-RenderPass.prototype = Object.assign( Object.create( Pass.prototype ), {
-
-	constructor: RenderPass,
-
-	render: function ( renderer, writeBuffer, readBuffer, delta, maskActive ) {
-
-		var oldAutoClear = renderer.autoClear;
-		renderer.autoClear = false;
-
-		this.scene.overrideMaterial = this.overrideMaterial;
-
-		var oldClearColor, oldClearAlpha;
-
-		if ( this.clearColor ) {
-
-			oldClearColor = renderer.getClearColor().getHex();
-			oldClearAlpha = renderer.getClearAlpha();
-
-			renderer.setClearColor( this.clearColor, this.clearAlpha );
-
-		}
-
-		if ( this.clearDepth ) {
-
-			renderer.clearDepth();
-
-		}
-
-		renderer.render( this.scene, this.camera, this.renderToScreen ? null : readBuffer, this.clear );
-
-		if ( this.clearColor ) {
-
-			renderer.setClearColor( oldClearColor, oldClearAlpha );
-
-		}
-
-		this.scene.overrideMaterial = null;
-		renderer.autoClear = oldAutoClear;
-	}
-
-} );
 
 /**
  * ThreeContext creates a WebGL context using THREEjs. It also handle mouse control.
@@ -1570,7 +1796,18 @@ class ThreeContext extends EventManager {
     let renderScene = new RenderPass( this._scene, this._camera );
     this._composer.addPass( renderScene );
 
-    this.addBloom();
+    // Adding some postprocessings:
+    // A. UnrealBloom
+    //this.addBloom()
+
+    // B. Sobel operator
+    //this.addSobel()
+
+    // C. NoChange
+    this.addNoChange();
+
+    // D. PixelShader
+    //this.addPixelShader()
 
     // all the necessary for raycasting
     this._raycaster = new Raycaster();
@@ -1629,6 +1866,33 @@ class ThreeContext extends EventManager {
   }
 
 
+  addSobel() {
+    let effectGrayScale = new ShaderPass( LuminosityShader );
+    this._composer.addPass( effectGrayScale );
+
+    let effectSobel = new ShaderPass( SobelOperatorShader );
+    effectSobel.renderToScreen = true;
+    effectSobel.uniforms.resolution.value.x = window.innerWidth;
+    effectSobel.uniforms.resolution.value.y = window.innerHeight;
+    this._composer.addPass( effectSobel );
+  }
+
+
+  addNoChange() {
+    let noChange = new ShaderPass( NoChange );
+    noChange.renderToScreen = true;
+    this._composer.addPass( noChange );
+  }
+
+  addPixelShader() {
+    let pixelPass = new ShaderPass( PixelShader );
+    pixelPass.uniforms.resolution.value = new Vector2( this._divObj.clientWidth, this._divObj.clientHeight );
+    pixelPass.uniforms.resolution.value.multiplyScalar( window.devicePixelRatio );
+    pixelPass.renderToScreen = true;
+    pixelPass.uniforms.pixelSize.value = 10;
+    this._composer.addPass( pixelPass );
+  }
+
 
   /**
    * Adds a Thorus knot to the scene
@@ -1637,8 +1901,8 @@ class ThreeContext extends EventManager {
     const geometry = new TorusKnotBufferGeometry(10, 3, 100, 16);
     const material = new MeshPhongMaterial({
       color: Math.ceil(Math.random() * 0xffff00),
-      wireframeLinewidth: 12,
-      wireframe: true
+      //wireframeLinewidth: 12,
+      //wireframe: true
     });
     const torusKnot = new Mesh(geometry, material);
     this._scene.add(torusKnot);

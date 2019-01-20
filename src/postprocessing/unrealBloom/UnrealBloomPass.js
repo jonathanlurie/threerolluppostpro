@@ -6,8 +6,8 @@
  */
 import * as THREE from 'three'
 import LuminosityHighPassShader from './LuminosityHighPassShader'
-import CopyShader from './CopyShader'
-import Pass from './Pass'
+import CopyShader from '../base/CopyShader'
+import Pass from '../base/Pass'
 
 const UnrealBloomPass = function ( resolution, strength, radius, threshold ) {
 

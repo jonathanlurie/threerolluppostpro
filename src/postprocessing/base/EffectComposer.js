@@ -110,6 +110,7 @@ Object.assign( EffectComposer.prototype, {
 
 			}
 
+      
 			if ( MaskPass !== undefined ) {
 
 				if ( pass instanceof MaskPass ) {
@@ -123,6 +124,7 @@ Object.assign( EffectComposer.prototype, {
 				}
 
 			}
+
 
 		}
 
