@@ -1,35 +1,35 @@
 
  const NoChange = {
 
-	uniforms: {
-		"tDiffuse": { type: "t", value: null }
-	},
+  uniforms: {
+    "tDiffuse": { type: "t", value: null }
+  },
 
-	vertexShader: [
+  vertexShader: [
 
-	"varying vec2 vUv;",
-	"void main() {",
-		"vUv = uv;",
-		"gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );",
+  "varying vec2 vUv;",
+  "void main() {",
+    "vUv = uv;",
+    "gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );",
 
-	"}"
+  "}"
 
-	].join("\n"),
+  ].join("\n"),
 
-	fragmentShader: [
+  fragmentShader: `
 
-	"uniform sampler2D tDiffuse;",
-	"varying vec2 vUv;",
+  uniform sampler2D tDiffuse;
+  varying vec2 vUv;
 
-	"void main() {",
+  void main() {
 
-		"vec4 color = texture2D(tDiffuse, vUv);",
-		"gl_FragColor = color;",
+    vec4 color = texture2D(tDiffuse, vUv);
+    gl_FragColor = color;
 
-	"}"
+  }
 
 
-	].join("\n")
+  `.trim()
 
 };
 

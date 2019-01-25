@@ -18,8 +18,21 @@ import SobelOperatorShader from './postprocessing/sobel/SobelOperatorShader'
 // specific for the noChange shader (test)
 import NoChange from './postprocessing/noChange/NoChange'
 
-// specifi for the PixelShader
+// specific for the PixelShader
 import PixelShader from './postprocessing/PixelShader/PixelShader'
+
+// specific for FXAA (antialiasing)
+import FXAAShader from './postprocessing/FXAA/FXAAShader'
+
+// blur 1
+import BlurShader from './postprocessing/blur/BlurShader'
+
+// noise
+import NoiseShader from './postprocessing/noise/NoiseShader'
+
+// blur random
+import BlurRandomShader from './postprocessing/blurRandom/BlurRandomShader'
+
 
 /**
  * ThreeContext creates a WebGL context using THREEjs. It also handle mouse control.
@@ -42,7 +55,7 @@ export class ThreeContext extends EventManager {
     }
 
     this._divObj = divObj
-
+    this._clock = 0
     this._requestFrameId = null
 
     // init camera
@@ -87,10 +100,23 @@ export class ThreeContext extends EventManager {
     //this.addSobel()
 
     // C. NoChange
-    this.addNoChange()
+    //this.addNoChange()
 
     // D. PixelShader
     //this.addPixelShader()
+
+    // E. Add antialiasing FXAA
+    // this.addFXAA()
+
+    // F. BlurShader
+    //this.addBlur()
+
+    // G. Noise
+    // this.addNoise()
+
+    // H. Blur Random
+    this.addBlurRandom()
+
 
     // all the necessary for raycasting
     this._raycaster = new THREE.Raycaster()
@@ -168,12 +194,48 @@ export class ThreeContext extends EventManager {
   }
 
   addPixelShader() {
-    let pixelPass = new ShaderPass( PixelShader );
+    let pixelPass = new ShaderPass( PixelShader )
     pixelPass.uniforms.resolution.value = new THREE.Vector2( this._divObj.clientWidth, this._divObj.clientHeight )
     pixelPass.uniforms.resolution.value.multiplyScalar( window.devicePixelRatio )
     pixelPass.renderToScreen = true
     pixelPass.uniforms.pixelSize.value = 10
     this._composer.addPass( pixelPass )
+  }
+
+  // NOT WORKING
+  addFXAA() {
+    let fxaaPass = new ShaderPass( FXAAShader )
+    fxaaPass.uniforms.resolution.value.x = 1 / this._divObj.clientWidth
+    fxaaPass.uniforms.resolution.value.y = 1 / this._divObj.clientHeight
+    fxaaPass.renderToScreen = true
+    this._composer.addPass( fxaaPass )
+
+  }
+
+
+  addBlur() {
+    let blurPass = new ShaderPass( BlurShader )
+    blurPass.uniforms.resolution.value = new THREE.Vector2( this._divObj.clientWidth, this._divObj.clientHeight )
+    blurPass.renderToScreen = true
+    this._composer.addPass( blurPass )
+  }
+
+
+  addNoise() {
+    let noisePass = new ShaderPass( NoiseShader )
+    noisePass.uniforms.resolution.value = new THREE.Vector2( this._divObj.clientWidth, this._divObj.clientHeight )
+    noisePass.renderToScreen = true
+    this._composer.addPass( noisePass )
+  }
+
+
+  addBlurRandom() {
+    let blurRandomPass = new ShaderPass( BlurRandomShader )
+    blurRandomPass.uniforms.resolution.value = new THREE.Vector2( this._divObj.clientWidth, this._divObj.clientHeight )
+    blurRandomPass.renderToScreen = true
+    this._composer.addPass( blurRandomPass )
+
+    this.blurRandomPass = blurRandomPass
   }
 
 
@@ -227,9 +289,15 @@ export class ThreeContext extends EventManager {
    * deals with rendering and updating the controls
    */
   _animate() {
+    if ("blurRandomPass" in this) {
+      this.blurRandomPass.uniforms.clock.value = this._clock
+    }
+
+
     this._requestFrameId = requestAnimationFrame(this._animate.bind(this))
     this._controls.update()
     this._render()
+    this._clock ++
   }
 
 
