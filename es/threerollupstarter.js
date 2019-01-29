@@ -2883,27 +2883,19 @@ const BlurShader = {
       float texSizeX = 1. / resolution.x;
       float texSizeY = 1. / resolution.y;
       vec4 color = vec4(0.0);
-      color += texture2D(image, uv);
-      color += texture2D(image, uv + vec2(texSizeY, 0.)); // NORTH
-      color += texture2D(image, uv + vec2(texSizeY, texSizeX)); // NW
-      color += texture2D(image, uv + vec2(0., texSizeX)); // EAST
-      color += texture2D(image, uv + vec2(-texSizeY, texSizeX)); // SE
-      color += texture2D(image, uv + vec2(-texSizeY, 0.)); // SOUTH
-      color += texture2D(image, uv + vec2(-texSizeY, -texSizeX)); // SW
-      color += texture2D(image, uv + vec2(0., -texSizeX)); // WEST
-      color += texture2D(image, uv + vec2(texSizeY, -texSizeX)); // NW
+      //color += texture2D(image, uv);
+//      color += texture2D(image, uv + vec2(texSizeY, 0.));
 
-      // distance 2
-      color += texture2D(image, uv + vec2(2. * texSizeY, 0.)); // NORTH
-      color += texture2D(image, uv + vec2(2. * texSizeY, 2. * texSizeX)); // NW
-      color += texture2D(image, uv + vec2(0., 2. * texSizeX)); // EAST
-      color += texture2D(image, uv + vec2(2. * -texSizeY, 2. * texSizeX)); // SE
-      color += texture2D(image, uv + vec2(2. * -texSizeY, 0.)); // SOUTH
-      color += texture2D(image, uv + vec2(2. * -texSizeY, 2. * -texSizeX)); // SW
-      color += texture2D(image, uv + vec2(0., 2. * -texSizeX)); // WEST
-      color += texture2D(image, uv + vec2(2. * texSizeY, 2. * -texSizeX)); // NW
+      const int halfKernelSize = 5;
 
-      color = color * 0.058823529411765;
+
+      for(int i=-halfKernelSize;i<=halfKernelSize;i++){
+        for(int j=-halfKernelSize;j<=halfKernelSize;j++){
+          color += texture2D(image, uv + vec2(float(i)*texSizeX, float(j)*texSizeY));
+        }
+      }
+
+      color = color / 100.;
 
       return color;
     }
@@ -3003,8 +2995,8 @@ const BlurShader$2 = {
       vec4 color = vec4(0., 0., 0., 0.);
       //vec4 color = texture2D(image, uv);
 
-      float d = 30.;
-      const int nbSamples = 15;
+      float d = 16.;
+      const int nbSamples = 20;
 
       for(int i=0;i<nbSamples;i++){
         float randomDeltaX = texSizeX * rand( uv * (float(i) + 1. * clock) ) * d - (d*0.5) * texSizeX;
@@ -3019,8 +3011,9 @@ const BlurShader$2 = {
 
 
     void main() {
-      vec4 color = blur(tDiffuse, vUv, resolution);
-      gl_FragColor = color;
+      vec4 originalColor = texture2D(tDiffuse, vUv);
+      vec4 bluredColor = blur(tDiffuse, vUv, resolution) * 3.;
+      gl_FragColor = originalColor + bluredColor;
     }
 
   `.trim()
@@ -3048,7 +3041,7 @@ class ThreeContext extends EventManager {
     }
 
     this._divObj = divObj;
-    this._clock = 0;
+    this._clock = 1;
     this._requestFrameId = null;
 
     // init camera
@@ -3102,13 +3095,13 @@ class ThreeContext extends EventManager {
     // this.addFXAA()
 
     // F. BlurShader
-    //this.addBlur()
+    this.addBlur();
 
     // G. Noise
     // this.addNoise()
 
     // H. Blur Random
-    this.addBlurRandom();
+    //this.addBlurRandom()
 
 
     // all the necessary for raycasting
@@ -3240,7 +3233,7 @@ class ThreeContext extends EventManager {
     const material = new MeshPhongMaterial({
       color: Math.ceil(Math.random() * 0xffff00),
       //wireframeLinewidth: 12,
-      //wireframe: true
+      wireframe: true
     });
     const torusKnot = new Mesh(geometry, material);
     this._scene.add(torusKnot);
@@ -3290,7 +3283,7 @@ class ThreeContext extends EventManager {
     this._requestFrameId = requestAnimationFrame(this._animate.bind(this));
     this._controls.update();
     this._render();
-    this._clock ++;
+    // this._clock ++
   }
 
 

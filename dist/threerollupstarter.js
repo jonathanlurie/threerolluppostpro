@@ -49744,31 +49744,149 @@
     varying vec2 vUv;
 
 
+    int mod2(float a, float b){
+      return int(a - (b * floor(a/b)));
+    }
+
     vec4 blur(sampler2D image, vec2 uv, vec2 resolution) {
       float texSizeX = 1. / resolution.x;
       float texSizeY = 1. / resolution.y;
       vec4 color = vec4(0.0);
-      color += texture2D(image, uv);
-      color += texture2D(image, uv + vec2(texSizeY, 0.)); // NORTH
-      color += texture2D(image, uv + vec2(texSizeY, texSizeX)); // NW
-      color += texture2D(image, uv + vec2(0., texSizeX)); // EAST
-      color += texture2D(image, uv + vec2(-texSizeY, texSizeX)); // SE
-      color += texture2D(image, uv + vec2(-texSizeY, 0.)); // SOUTH
-      color += texture2D(image, uv + vec2(-texSizeY, -texSizeX)); // SW
-      color += texture2D(image, uv + vec2(0., -texSizeX)); // WEST
-      color += texture2D(image, uv + vec2(texSizeY, -texSizeX)); // NW
+      //color += texture2D(image, uv);
+//      color += texture2D(image, uv + vec2(texSizeY, 0.));
 
-      // distance 2
-      color += texture2D(image, uv + vec2(2. * texSizeY, 0.)); // NORTH
-      color += texture2D(image, uv + vec2(2. * texSizeY, 2. * texSizeX)); // NW
-      color += texture2D(image, uv + vec2(0., 2. * texSizeX)); // EAST
-      color += texture2D(image, uv + vec2(2. * -texSizeY, 2. * texSizeX)); // SE
-      color += texture2D(image, uv + vec2(2. * -texSizeY, 0.)); // SOUTH
-      color += texture2D(image, uv + vec2(2. * -texSizeY, 2. * -texSizeX)); // SW
-      color += texture2D(image, uv + vec2(0., 2. * -texSizeX)); // WEST
-      color += texture2D(image, uv + vec2(2. * texSizeY, 2. * -texSizeX)); // NW
+      const int halfKernelSize = 1;
 
-      color = color * 0.058823529411765;
+      float counter = 0.;
+      int actualCounter = 0;
+
+      for(int i=-halfKernelSize;i<=halfKernelSize;i++){
+        for(int j=-halfKernelSize;j<=halfKernelSize;j++){
+
+          //if(mod2(counter, 2.) == 0) {
+            actualCounter ++;
+            color += texture2D(image, uv + vec2(float(i)*texSizeX, float(j)*texSizeY));
+          //}
+          //counter ++;
+
+        }
+      }
+
+      color = color / float(actualCounter);
+
+      return color;
+    }
+
+    void main() {
+
+      vec4 color = blur(tDiffuse, vUv, resolution);
+
+      //vec4 color = texture2D(tDiffuse, vUv);
+      gl_FragColor = color;
+
+    }
+
+  `.trim()
+
+	};
+
+	const BlurHShader = {
+
+	  uniforms: {
+	    "tDiffuse": { type: "t", value: null },
+	    "resolution": { value: null },
+	  },
+
+	  vertexShader: `
+
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+    }
+
+  `.trim(),
+
+	  fragmentShader:
+
+	  `
+    uniform vec2 resolution;
+    uniform sampler2D tDiffuse;
+    varying vec2 vUv;
+
+
+    int mod2(float a, float b){
+      return int(a - (b * floor(a/b)));
+    }
+
+    vec4 blur(sampler2D image, vec2 uv, vec2 resolution) {
+      float texSizeX = 1. / resolution.x;
+      float texSizeY = 1. / resolution.y;
+      vec4 color = vec4(0.0);
+      const int halfKernelSize = 20;
+
+      for(int i=-halfKernelSize;i<=halfKernelSize;i++){
+        color += texture2D(image, uv + vec2(float(i)*texSizeX, 0.));
+      }
+
+      color = color / (float(halfKernelSize)*2.+1.);
+
+      return color;
+    }
+
+    void main() {
+
+      vec4 color = blur(tDiffuse, vUv, resolution);
+
+      //vec4 color = texture2D(tDiffuse, vUv);
+      gl_FragColor = color;
+
+    }
+
+  `.trim()
+
+	};
+
+	const BlurVShader = {
+
+	  uniforms: {
+	    "tDiffuse": { type: "t", value: null },
+	    "resolution": { value: null },
+	  },
+
+	  vertexShader: `
+
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+    }
+
+  `.trim(),
+
+	  fragmentShader:
+
+	  `
+    uniform vec2 resolution;
+    uniform sampler2D tDiffuse;
+    varying vec2 vUv;
+
+
+    int mod2(float a, float b){
+      return int(a - (b * floor(a/b)));
+    }
+
+    vec4 blur(sampler2D image, vec2 uv, vec2 resolution) {
+      float texSizeX = 1. / resolution.x;
+      float texSizeY = 1. / resolution.y;
+      vec4 color = vec4(0.0);
+      const int halfKernelSize = 20;
+
+      for(int i=-halfKernelSize;i<=halfKernelSize;i++){
+        color += texture2D(image, uv + vec2(0., float(i)*texSizeY));
+      }
+
+      color = color / (float(halfKernelSize)*2.+1.);
 
       return color;
     }
@@ -49868,8 +49986,8 @@
       vec4 color = vec4(0., 0., 0., 0.);
       //vec4 color = texture2D(image, uv);
 
-      float d = 30.;
-      const int nbSamples = 15;
+      float d = 16.;
+      const int nbSamples = 20;
 
       for(int i=0;i<nbSamples;i++){
         float randomDeltaX = texSizeX * rand( uv * (float(i) + 1. * clock) ) * d - (d*0.5) * texSizeX;
@@ -49884,8 +50002,9 @@
 
 
     void main() {
-      vec4 color = blur(tDiffuse, vUv, resolution);
-      gl_FragColor = color;
+      vec4 originalColor = texture2D(tDiffuse, vUv);
+      vec4 bluredColor = blur(tDiffuse, vUv, resolution) * 3.;
+      gl_FragColor = originalColor + bluredColor;
     }
 
   `.trim()
@@ -49913,7 +50032,7 @@
 	    }
 
 	    this._divObj = divObj;
-	    this._clock = 0;
+	    this._clock = 1;
 	    this._requestFrameId = null;
 
 	    // init camera
@@ -49947,8 +50066,7 @@
 	    this._composer = new EffectComposer( this._renderer );
 	    this._composer.setSize( divObj.clientWidth, divObj.clientHeight );
 
-	    let renderScene = new RenderPass( this._scene, this._camera );
-	    this._composer.addPass( renderScene );
+	    //
 
 	    // Adding some postprocessings:
 	    // A. UnrealBloom
@@ -49967,13 +50085,16 @@
 	    // this.addFXAA()
 
 	    // F. BlurShader
-	    //this.addBlur()
+	    this.addBlur();
+
 
 	    // G. Noise
 	    // this.addNoise()
 
 	    // H. Blur Random
-	    this.addBlurRandom();
+	    //this.addBlurRandom()
+
+
 
 
 	    // all the necessary for raycasting
@@ -50072,10 +50193,20 @@
 
 
 	  addBlur() {
-	    let blurPass = new ShaderPass( BlurShader );
-	    blurPass.uniforms.resolution.value = new Vector2( this._divObj.clientWidth, this._divObj.clientHeight );
-	    blurPass.renderToScreen = true;
-	    this._composer.addPass( blurPass );
+	    let renderPass = new RenderPass( this._scene, this._camera );
+	    this._composer.addPass( renderPass );
+
+	    let blurPassV = new ShaderPass( BlurVShader );
+	    blurPassV.uniforms.resolution.value = new Vector2( this._divObj.clientWidth, this._divObj.clientHeight );
+	    //blurPassV.renderToScreen = true
+	    this._composer.addPass( blurPassV );
+
+
+	    let blurPassH = new ShaderPass( BlurHShader );
+	    blurPassH.uniforms.resolution.value = new Vector2( this._divObj.clientWidth, this._divObj.clientHeight );
+	    blurPassH.renderToScreen = true;
+	    this._composer.addPass( blurPassH );
+
 	  }
 
 
@@ -50105,7 +50236,7 @@
 	    const material = new MeshPhongMaterial({
 	      color: Math.ceil(Math.random() * 0xffff00),
 	      //wireframeLinewidth: 12,
-	      //wireframe: true
+	      wireframe: true
 	    });
 	    const torusKnot = new Mesh(geometry, material);
 	    this._scene.add(torusKnot);
@@ -50155,7 +50286,7 @@
 	    this._requestFrameId = requestAnimationFrame(this._animate.bind(this));
 	    this._controls.update();
 	    this._render();
-	    this._clock ++;
+	    // this._clock ++
 	  }
 
 

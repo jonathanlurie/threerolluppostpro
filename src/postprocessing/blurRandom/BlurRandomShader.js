@@ -36,8 +36,8 @@ const BlurShader = {
       vec4 color = vec4(0., 0., 0., 0.);
       //vec4 color = texture2D(image, uv);
 
-      float d = 30.;
-      const int nbSamples = 15;
+      float d = 16.;
+      const int nbSamples = 20;
 
       for(int i=0;i<nbSamples;i++){
         float randomDeltaX = texSizeX * rand( uv * (float(i) + 1. * clock) ) * d - (d*0.5) * texSizeX;
@@ -52,8 +52,9 @@ const BlurShader = {
 
 
     void main() {
-      vec4 color = blur(tDiffuse, vUv, resolution);
-      gl_FragColor = color;
+      vec4 originalColor = texture2D(tDiffuse, vUv);
+      vec4 bluredColor = blur(tDiffuse, vUv, resolution) * 3.;
+      gl_FragColor = originalColor + bluredColor;
     }
 
   `.trim()

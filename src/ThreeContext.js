@@ -26,6 +26,8 @@ import FXAAShader from './postprocessing/FXAA/FXAAShader'
 
 // blur 1
 import BlurShader from './postprocessing/blur/BlurShader'
+import BlurHShader from './postprocessing/blurH/BlurHShader'
+import BlurVShader from './postprocessing/blurV/BlurVShader'
 
 // noise
 import NoiseShader from './postprocessing/noise/NoiseShader'
@@ -55,7 +57,7 @@ export class ThreeContext extends EventManager {
     }
 
     this._divObj = divObj
-    this._clock = 0
+    this._clock = 1
     this._requestFrameId = null
 
     // init camera
@@ -89,8 +91,7 @@ export class ThreeContext extends EventManager {
     this._composer = new EffectComposer( this._renderer )
     this._composer.setSize( divObj.clientWidth, divObj.clientHeight )
 
-    let renderScene = new RenderPass( this._scene, this._camera )
-    this._composer.addPass( renderScene )
+    //
 
     // Adding some postprocessings:
     // A. UnrealBloom
@@ -109,13 +110,16 @@ export class ThreeContext extends EventManager {
     // this.addFXAA()
 
     // F. BlurShader
-    //this.addBlur()
+    this.addBlur()
+
 
     // G. Noise
     // this.addNoise()
 
     // H. Blur Random
-    this.addBlurRandom()
+    //this.addBlurRandom()
+
+
 
 
     // all the necessary for raycasting
@@ -214,10 +218,20 @@ export class ThreeContext extends EventManager {
 
 
   addBlur() {
-    let blurPass = new ShaderPass( BlurShader )
-    blurPass.uniforms.resolution.value = new THREE.Vector2( this._divObj.clientWidth, this._divObj.clientHeight )
-    blurPass.renderToScreen = true
-    this._composer.addPass( blurPass )
+    let renderPass = new RenderPass( this._scene, this._camera )
+    this._composer.addPass( renderPass )
+
+    let blurPassV = new ShaderPass( BlurVShader )
+    blurPassV.uniforms.resolution.value = new THREE.Vector2( this._divObj.clientWidth, this._divObj.clientHeight )
+    //blurPassV.renderToScreen = true
+    this._composer.addPass( blurPassV )
+
+
+    let blurPassH = new ShaderPass( BlurHShader )
+    blurPassH.uniforms.resolution.value = new THREE.Vector2( this._divObj.clientWidth, this._divObj.clientHeight )
+    blurPassH.renderToScreen = true
+    this._composer.addPass( blurPassH )
+
   }
 
 
@@ -247,7 +261,7 @@ export class ThreeContext extends EventManager {
     const material = new THREE.MeshPhongMaterial({
       color: Math.ceil(Math.random() * 0xffff00),
       //wireframeLinewidth: 12,
-      //wireframe: true
+      wireframe: true
     })
     const torusKnot = new THREE.Mesh(geometry, material)
     this._scene.add(torusKnot)
@@ -297,7 +311,7 @@ export class ThreeContext extends EventManager {
     this._requestFrameId = requestAnimationFrame(this._animate.bind(this))
     this._controls.update()
     this._render()
-    this._clock ++
+    // this._clock ++
   }
 
 

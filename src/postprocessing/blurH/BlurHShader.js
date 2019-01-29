@@ -1,6 +1,6 @@
 
 
-const BlurShader = {
+const BlurHShader = {
 
   uniforms: {
     "tDiffuse": { type: "t", value: null },
@@ -33,27 +33,13 @@ const BlurShader = {
       float texSizeX = 1. / resolution.x;
       float texSizeY = 1. / resolution.y;
       vec4 color = vec4(0.0);
-      //color += texture2D(image, uv);
-//      color += texture2D(image, uv + vec2(texSizeY, 0.));
-
-      const int halfKernelSize = 1;
-
-      float counter = 0.;
-      int actualCounter = 0;
+      const int halfKernelSize = 20;
 
       for(int i=-halfKernelSize;i<=halfKernelSize;i++){
-        for(int j=-halfKernelSize;j<=halfKernelSize;j++){
-
-          //if(mod2(counter, 2.) == 0) {
-            actualCounter ++;
-            color += texture2D(image, uv + vec2(float(i)*texSizeX, float(j)*texSizeY));
-          //}
-          //counter ++;
-
-        }
+        color += texture2D(image, uv + vec2(float(i)*texSizeX, 0.));
       }
 
-      color = color / float(actualCounter);
+      color = color / (float(halfKernelSize)*2.+1.);
 
       return color;
     }
@@ -71,4 +57,4 @@ const BlurShader = {
 
 };
 
-export default BlurShader
+export default BlurHShader
