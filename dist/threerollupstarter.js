@@ -49719,11 +49719,106 @@
 
 	};
 
+	/**
+	 * Generate a 1D gaussian kernel of a desired size and with a given standard deviation
+	 * If the kernel size is too small for the sdd, some energy may be lost.
+	 * This function will compensate the loss but this can be avoided by turning
+	 * boostEnergy to false.
+	 * @param {Number} size - size of the kernel. Will be turned into q odd number if not
+	 * @param {Number} sigma - standard deviation of the gaussian
+	 * @param  {Boolean} boostEnergy - will compensate for energy loss if true
+	 * @return {Float32Array} the 1D gaussian kernel
+	 */
+	function gaussian(size, sigma = 1., boostEnergy=true) {
+	  let energyLossTolerance = 1e-2;
+	  let mu = 0.;
+
+	  // we want a 2n+1 kind of kernel
+	  if(size % 2 === 0) {
+	    size ++;
+	  }
+
+	  let halfSize = ~~(size / 2);
+	  let all_x = new Float32Array(size).map((x, index) => index - halfSize);
+	  let all_y = all_x.map( x => (1./(sigma*Math.sqrt(2*Math.PI))) * Math.exp(-Math.pow(x - mu, 2.) / (2 * Math.pow(sigma, 2.))) );
+	  let energyLost = 1 - all_y.reduce((acc, val) => (acc + val));
+
+	  if(energyLost > energyLossTolerance) {
+	    if(boostEnergy){
+	      all_y = compensateLostEnergy(all_y);
+	    } else {
+	      console.warn(`Lost energy: ${~~(energyLost*100)}%`);
+	    }
+	  }
+
+	  return {
+	    kernel: all_y,
+	    energyLost: energyLost
+	  }
+	}
+
+
+	/**
+	 * Shitty way to compensate for energy loss, still working ok since JS is ok fast.
+	 * @param  {Array} kernel - the gaussian kernel
+	 * @return {Array} the boosted gaussian kernel
+	 */
+	function compensateLostEnergy(kernel){
+	  let energy = kernel.reduce((acc, val) => (acc + val));
+	  let firstEnergy = energy;
+
+	  // brute force stupid method to increase energy
+	  let nbIteration = 0;
+	  while (energy < 1) {
+	    kernel = kernel.map(x => x*1.001);
+	    energy = kernel.reduce((acc, val) => (acc + val));
+	    nbIteration ++;
+	  }
+
+	  console.warn(`Energy boosted from ${~~(firstEnergy*100)}% to ${~~(energy*100)}% after ${nbIteration} iterations.`);
+	  return kernel
+	}
+
+
+	/**
+	 * Makes a GLSL gaussian blur function of a desired kernel size with a desired
+	 * standard deviation. Note that the generated GLSLS function is made to be double
+	 * pass (one vertical, one horizontal) as the generated kernel is single dimensional.
+	 * (gaussian function is separable)
+	 * @param {Number} size - size of the kernel. Will be turned into q odd number if not
+	 * @param {Number} sigma - standard deviation of the gaussian
+	 * @param {String} functionName - name the GLSL function will have once generated
+	 * @return {String} The GLSL bluring function
+	 */
+	function makeCustomBlurShaderFunction(size = 13, sigma = 1, functionName = 'blur') {
+	  let {kernel, energyLost} = gaussian(size, sigma);
+
+	  let shaderFunction = `vec4 ${functionName}(sampler2D image, vec2 uv, vec2 resolution, vec2 direction) {\n`;
+	  shaderFunction += `\tvec4 color = vec4(0.0);\n`;
+	  shaderFunction += `\tvec2 step = direction / resolution;\n`;
+	  let halfSize = ~~(kernel.length / 2);
+
+	  // adding the central weight
+	  shaderFunction += `\tcolor += texture2D(image, uv) * ${kernel[halfSize]};\n`;
+
+	  // adding the other weight
+	  for (let i=1; i<=halfSize; i++) {
+	    shaderFunction += `\tvec2 d${i} = step * ${i}.;\n`;
+	    shaderFunction += `\tcolor += texture2D(image, uv + d${i}) * ${kernel[halfSize-i]};\n`;
+	    shaderFunction += `\tcolor += texture2D(image, uv - d${i}) * ${kernel[halfSize-i]};\n`;
+	  }
+
+	  shaderFunction += `\treturn color;\n`;
+	  shaderFunction += `}\n`;
+	  return shaderFunction
+	}
+
 	const BlurShader = {
 
 	  uniforms: {
 	    "tDiffuse": { type: "t", value: null },
 	    "resolution": { value: null },
+	    "direction": { value: null },
 	  },
 
 	  vertexShader: `
@@ -49737,167 +49832,16 @@
   `.trim(),
 
 	  fragmentShader:
-
+	  makeCustomBlurShaderFunction(51, 10) +
 	  `
     uniform vec2 resolution;
+    uniform vec2 direction;
     uniform sampler2D tDiffuse;
     varying vec2 vUv;
 
-
-    int mod2(float a, float b){
-      return int(a - (b * floor(a/b)));
-    }
-
-    vec4 blur(sampler2D image, vec2 uv, vec2 resolution) {
-      float texSizeX = 1. / resolution.x;
-      float texSizeY = 1. / resolution.y;
-      vec4 color = vec4(0.0);
-      //color += texture2D(image, uv);
-//      color += texture2D(image, uv + vec2(texSizeY, 0.));
-
-      const int halfKernelSize = 1;
-
-      float counter = 0.;
-      int actualCounter = 0;
-
-      for(int i=-halfKernelSize;i<=halfKernelSize;i++){
-        for(int j=-halfKernelSize;j<=halfKernelSize;j++){
-
-          //if(mod2(counter, 2.) == 0) {
-            actualCounter ++;
-            color += texture2D(image, uv + vec2(float(i)*texSizeX, float(j)*texSizeY));
-          //}
-          //counter ++;
-
-        }
-      }
-
-      color = color / float(actualCounter);
-
-      return color;
-    }
-
     void main() {
-
-      vec4 color = blur(tDiffuse, vUv, resolution);
-
-      //vec4 color = texture2D(tDiffuse, vUv);
+      vec4 color = blur(tDiffuse, vUv, resolution, direction);
       gl_FragColor = color;
-
-    }
-
-  `.trim()
-
-	};
-
-	const BlurHShader = {
-
-	  uniforms: {
-	    "tDiffuse": { type: "t", value: null },
-	    "resolution": { value: null },
-	  },
-
-	  vertexShader: `
-
-    varying vec2 vUv;
-    void main() {
-      vUv = uv;
-      gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
-    }
-
-  `.trim(),
-
-	  fragmentShader:
-
-	  `
-    uniform vec2 resolution;
-    uniform sampler2D tDiffuse;
-    varying vec2 vUv;
-
-
-    int mod2(float a, float b){
-      return int(a - (b * floor(a/b)));
-    }
-
-    vec4 blur(sampler2D image, vec2 uv, vec2 resolution) {
-      float texSizeX = 1. / resolution.x;
-      float texSizeY = 1. / resolution.y;
-      vec4 color = vec4(0.0);
-      const int halfKernelSize = 20;
-
-      for(int i=-halfKernelSize;i<=halfKernelSize;i++){
-        color += texture2D(image, uv + vec2(float(i)*texSizeX, 0.));
-      }
-
-      color = color / (float(halfKernelSize)*2.+1.);
-
-      return color;
-    }
-
-    void main() {
-
-      vec4 color = blur(tDiffuse, vUv, resolution);
-
-      //vec4 color = texture2D(tDiffuse, vUv);
-      gl_FragColor = color;
-
-    }
-
-  `.trim()
-
-	};
-
-	const BlurVShader = {
-
-	  uniforms: {
-	    "tDiffuse": { type: "t", value: null },
-	    "resolution": { value: null },
-	  },
-
-	  vertexShader: `
-
-    varying vec2 vUv;
-    void main() {
-      vUv = uv;
-      gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
-    }
-
-  `.trim(),
-
-	  fragmentShader:
-
-	  `
-    uniform vec2 resolution;
-    uniform sampler2D tDiffuse;
-    varying vec2 vUv;
-
-
-    int mod2(float a, float b){
-      return int(a - (b * floor(a/b)));
-    }
-
-    vec4 blur(sampler2D image, vec2 uv, vec2 resolution) {
-      float texSizeX = 1. / resolution.x;
-      float texSizeY = 1. / resolution.y;
-      vec4 color = vec4(0.0);
-      const int halfKernelSize = 20;
-
-      for(int i=-halfKernelSize;i<=halfKernelSize;i++){
-        color += texture2D(image, uv + vec2(0., float(i)*texSizeY));
-      }
-
-      color = color / (float(halfKernelSize)*2.+1.);
-
-      return color;
-    }
-
-    void main() {
-
-      vec4 color = blur(tDiffuse, vUv, resolution);
-
-      //vec4 color = texture2D(tDiffuse, vUv);
-      gl_FragColor = color;
-
     }
 
   `.trim()
@@ -50192,7 +50136,7 @@
 	  }
 
 
-	  addBlur() {
+	  addBlur_median() {
 	    let renderPass = new RenderPass( this._scene, this._camera );
 	    this._composer.addPass( renderPass );
 
@@ -50204,6 +50148,26 @@
 
 	    let blurPassH = new ShaderPass( BlurHShader );
 	    blurPassH.uniforms.resolution.value = new Vector2( this._divObj.clientWidth, this._divObj.clientHeight );
+	    blurPassH.renderToScreen = true;
+	    this._composer.addPass( blurPassH );
+
+	  }
+
+
+	  addBlur() {
+	    let renderPass = new RenderPass( this._scene, this._camera );
+	    this._composer.addPass( renderPass );
+
+	    let blurPassV = new ShaderPass( BlurShader );
+	    blurPassV.uniforms.resolution.value = new Vector2( this._divObj.clientWidth, this._divObj.clientHeight );
+	    blurPassV.uniforms.direction.value = new Vector2( 0, 1 );
+	    // blurPassV.renderToScreen = true
+	    this._composer.addPass( blurPassV );
+
+
+	    let blurPassH = new ShaderPass( BlurShader );
+	    blurPassH.uniforms.resolution.value = new Vector2( this._divObj.clientWidth, this._divObj.clientHeight );
+	    blurPassH.uniforms.direction.value = new Vector2( 1, 0 );
 	    blurPassH.renderToScreen = true;
 	    this._composer.addPass( blurPassH );
 

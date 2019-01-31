@@ -24,10 +24,8 @@ import PixelShader from './postprocessing/PixelShader/PixelShader'
 // specific for FXAA (antialiasing)
 import FXAAShader from './postprocessing/FXAA/FXAAShader'
 
-// blur 1
+// blur
 import BlurShader from './postprocessing/blur/BlurShader'
-import BlurHShader from './postprocessing/blurH/BlurHShader'
-import BlurVShader from './postprocessing/blurV/BlurVShader'
 
 // noise
 import NoiseShader from './postprocessing/noise/NoiseShader'
@@ -217,7 +215,7 @@ export class ThreeContext extends EventManager {
   }
 
 
-  addBlur() {
+  addBlur_median() {
     let renderPass = new RenderPass( this._scene, this._camera )
     this._composer.addPass( renderPass )
 
@@ -229,6 +227,26 @@ export class ThreeContext extends EventManager {
 
     let blurPassH = new ShaderPass( BlurHShader )
     blurPassH.uniforms.resolution.value = new THREE.Vector2( this._divObj.clientWidth, this._divObj.clientHeight )
+    blurPassH.renderToScreen = true
+    this._composer.addPass( blurPassH )
+
+  }
+
+
+  addBlur() {
+    let renderPass = new RenderPass( this._scene, this._camera )
+    this._composer.addPass( renderPass )
+
+    let blurPassV = new ShaderPass( BlurShader )
+    blurPassV.uniforms.resolution.value = new THREE.Vector2( this._divObj.clientWidth, this._divObj.clientHeight )
+    blurPassV.uniforms.direction.value = new THREE.Vector2( 0, 1 )
+    // blurPassV.renderToScreen = true
+    this._composer.addPass( blurPassV )
+
+
+    let blurPassH = new ShaderPass( BlurShader )
+    blurPassH.uniforms.resolution.value = new THREE.Vector2( this._divObj.clientWidth, this._divObj.clientHeight )
+    blurPassH.uniforms.direction.value = new THREE.Vector2( 1, 0 )
     blurPassH.renderToScreen = true
     this._composer.addPass( blurPassH )
 
