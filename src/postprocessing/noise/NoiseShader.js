@@ -34,11 +34,11 @@ const BlurShader = {
 
       vec4 textureColor = texture2D(tDiffuse, vUv);
 
-      vec4 color = textureColor - randWeight;
-      //gl_FragColor = color;
+      vec4 color = textureColor + randWeight/2.;
+      gl_FragColor = color;
 
-      float randWeight2 = rand(vUv);
-      gl_FragColor = vec4(randWeight2, randWeight2, randWeight2, 1.);
+      // float randWeight2 = rand(vUv);
+      // gl_FragColor = vec4(randWeight2, randWeight2, randWeight2, 1.);
 
     }
 

@@ -33,7 +33,7 @@ import NoiseShader from './postprocessing/noise/NoiseShader'
 // blur random
 import BlurRandomShader from './postprocessing/blurRandom/BlurRandomShader'
 
-
+import MergerShader from './postprocessing/merger/MergerShader'
 /**
  * ThreeContext creates a WebGL context using THREEjs. It also handle mouse control.
  * An event can be associated to a ThreeContext instance: `onRaycast` with the method
@@ -108,7 +108,9 @@ export class ThreeContext extends EventManager {
     // this.addFXAA()
 
     // F. BlurShader
-    this.addBlur()
+    //this.addBlur()
+
+    this.addGlow()
 
 
     // G. Noise
@@ -243,14 +245,57 @@ export class ThreeContext extends EventManager {
     // blurPassV.renderToScreen = true
     this._composer.addPass( blurPassV )
 
-
     let blurPassH = new ShaderPass( BlurShader )
     blurPassH.uniforms.resolution.value = new THREE.Vector2( this._divObj.clientWidth, this._divObj.clientHeight )
     blurPassH.uniforms.direction.value = new THREE.Vector2( 1, 0 )
     blurPassH.renderToScreen = true
     this._composer.addPass( blurPassH )
-
   }
+
+
+
+  addGlow() {
+    let blurRenderTarget = new THREE.WebGLRenderTarget( this._divObj.clientWidth, this._divObj.clientHeight )
+
+
+
+    let blurComposer = new EffectComposer( this._renderer, blurRenderTarget )
+    this._blurComposer = blurComposer
+    blurComposer.setSize( this._divObj.clientWidth, this._divObj.clientHeight )
+
+    let blurBaseRenderPass = new RenderPass( this._scene, this._camera )
+    blurComposer.addPass( blurBaseRenderPass )
+
+    let blurPassV = new ShaderPass( BlurShader )
+    blurPassV.uniforms.resolution.value = new THREE.Vector2( this._divObj.clientWidth, this._divObj.clientHeight )
+    blurPassV.uniforms.direction.value = new THREE.Vector2( 0, 1 )
+    // blurPassV.renderToScreen = true
+    blurComposer.addPass( blurPassV )
+
+    let blurPassH = new ShaderPass( BlurShader )
+    blurPassH.uniforms.resolution.value = new THREE.Vector2( this._divObj.clientWidth, this._divObj.clientHeight )
+    blurPassH.uniforms.direction.value = new THREE.Vector2( 1, 0 )
+    //blurPassH.renderToScreen = true
+    blurComposer.addPass( blurPassH )
+
+    // blending with the original (unblured) scene
+    let mergeBaseRenderPass = new RenderPass( this._scene, this._camera )
+    this._composer.addPass( mergeBaseRenderPass )
+
+    let mergerPass = new ShaderPass( MergerShader )
+    mergerPass.uniforms.tGlow.value = blurComposer.renderTarget2
+    mergerPass.renderToScreen = true
+    this._composer.addPass( mergerPass )
+
+
+    // let noisePass = new ShaderPass( NoiseShader )
+    // noisePass.uniforms.resolution.value = new THREE.Vector2( this._divObj.clientWidth, this._divObj.clientHeight )
+    // noisePass.renderToScreen = true
+    // this._composer.addPass( noisePass )
+  }
+
+
+
 
 
   addNoise() {
@@ -339,6 +384,8 @@ export class ThreeContext extends EventManager {
    */
   _render() {
     //this._renderer.render(this._scene, this._camera)
+    if("_blurComposer" in this)
+      this._blurComposer.render()
     this._composer.render()
   }
 

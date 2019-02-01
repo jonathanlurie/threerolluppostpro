@@ -49729,7 +49729,7 @@
 	 * @param  {Boolean} boostEnergy - will compensate for energy loss if true
 	 * @return {Float32Array} the 1D gaussian kernel
 	 */
-	function gaussian(size, sigma = 1., boostEnergy=true) {
+	function gaussian(size=9, sigma = 1., boostEnergy=true) {
 	  let energyLossTolerance = 1e-2;
 	  let mu = 0.;
 
@@ -49781,31 +49781,47 @@
 
 
 	/**
-	 * Makes a GLSL gaussian blur function of a desired kernel size with a desired
-	 * standard deviation. Note that the generated GLSLS function is made to be double
-	 * pass (one vertical, one horizontal) as the generated kernel is single dimensional.
-	 * (gaussian function is separable)
-	 * @param {Number} size - size of the kernel. Will be turned into q odd number if not
-	 * @param {Number} sigma - standard deviation of the gaussian
-	 * @param {String} functionName - name the GLSL function will have once generated
-	 * @return {String} The GLSL bluring function
+	 * The gaussian kernel can be made a lot smaller by leveraging GPU linear interpolation
+	 * of textures. All is explned here:
+	 * http://rastergrid.com/blog/2010/09/efficient-gaussian-blur-with-linear-sampling/
+	 * @param  {Array} kernel - the gaussian kernel
+	 * @return {Array} the reduced gaussian kernel
 	 */
-	function makeCustomBlurShaderFunction(size = 13, sigma = 1, functionName = 'blur') {
+	function reduceKernel(kernel) {
+	  let halfSize = ~~(kernel.length / 2);
+	  let halfKernel = kernel.slice(halfSize);
+
+	  let offsets = [0];
+	  let weights = [halfKernel[0]];
+
+	  for (let i=1; i<halfKernel.length-1; i+=2) {
+	    let w = halfKernel[i] + halfKernel[i+1];
+	    let offset = (i * halfKernel[i] + (i + 1) * halfKernel[i+1]) / w;
+	    weights.push(w);
+	    offsets.push(offset);
+	  }
+
+	  return {
+	    weights: weights,
+	    offsets: offsets
+	  }
+	}
+
+
+	function makeFastBlurShaderFunction(size = 9, sigma = 1, functionName = 'blur') {
 	  let {kernel, energyLost} = gaussian(size, sigma);
+	  let {weights, offsets} = reduceKernel(kernel);
 
 	  let shaderFunction = `vec4 ${functionName}(sampler2D image, vec2 uv, vec2 resolution, vec2 direction) {\n`;
 	  shaderFunction += `\tvec4 color = vec4(0.0);\n`;
 	  shaderFunction += `\tvec2 step = direction / resolution;\n`;
-	  let halfSize = ~~(kernel.length / 2);
-
 	  // adding the central weight
-	  shaderFunction += `\tcolor += texture2D(image, uv) * ${kernel[halfSize]};\n`;
+	  shaderFunction += `\tcolor += texture2D(image, uv) * ${weights[0]};\n`;
 
-	  // adding the other weight
-	  for (let i=1; i<=halfSize; i++) {
-	    shaderFunction += `\tvec2 d${i} = step * ${i}.;\n`;
-	    shaderFunction += `\tcolor += texture2D(image, uv + d${i}) * ${kernel[halfSize-i]};\n`;
-	    shaderFunction += `\tcolor += texture2D(image, uv - d${i}) * ${kernel[halfSize-i]};\n`;
+	  for(let i=1; i<weights.length; i++) {
+	    shaderFunction += `\tvec2 offset${i} = step * ${offsets[i]};\n`;
+	    shaderFunction += `\tcolor += texture2D(image, uv + offset${i}) * ${weights[i]};\n`;
+	    shaderFunction += `\tcolor += texture2D(image, uv - offset${i}) * ${weights[i]};\n`;
 	  }
 
 	  shaderFunction += `\treturn color;\n`;
@@ -49832,8 +49848,23 @@
   `.trim(),
 
 	  fragmentShader:
-	  makeCustomBlurShaderFunction(51, 10) +
+	   makeFastBlurShaderFunction(27, 6) +
 	  `
+  vec4 blur13(sampler2D image, vec2 uv, vec2 resolution, vec2 direction) {
+    vec4 color = vec4(0.0);
+    vec2 off1 = vec2(1.411764705882353) * direction;
+    vec2 off2 = vec2(3.2941176470588234) * direction;
+    vec2 off3 = vec2(5.176470588235294) * direction;
+    color += texture2D(image, uv) * 0.1964825501511404;
+    color += texture2D(image, uv + (off1 / resolution)) * 0.2969069646728344;
+    color += texture2D(image, uv - (off1 / resolution)) * 0.2969069646728344;
+    color += texture2D(image, uv + (off2 / resolution)) * 0.09447039785044732;
+    color += texture2D(image, uv - (off2 / resolution)) * 0.09447039785044732;
+    color += texture2D(image, uv + (off3 / resolution)) * 0.010381362401148057;
+    color += texture2D(image, uv - (off3 / resolution)) * 0.010381362401148057;
+    return color;
+    }
+
     uniform vec2 resolution;
     uniform vec2 direction;
     uniform sampler2D tDiffuse;
@@ -49882,11 +49913,11 @@
 
       vec4 textureColor = texture2D(tDiffuse, vUv);
 
-      vec4 color = textureColor - randWeight;
-      //gl_FragColor = color;
+      vec4 color = textureColor + randWeight/2.;
+      gl_FragColor = color;
 
-      float randWeight2 = rand(vUv);
-      gl_FragColor = vec4(randWeight2, randWeight2, randWeight2, 1.);
+      // float randWeight2 = rand(vUv);
+      // gl_FragColor = vec4(randWeight2, randWeight2, randWeight2, 1.);
 
     }
 
@@ -49949,6 +49980,41 @@
       vec4 originalColor = texture2D(tDiffuse, vUv);
       vec4 bluredColor = blur(tDiffuse, vUv, resolution) * 3.;
       gl_FragColor = originalColor + bluredColor;
+    }
+
+  `.trim()
+
+	};
+
+	const MergerShader = {
+
+	  uniforms: {
+	    "tDiffuse": { type: "t", value: null },
+	    //"tGlow": { type: "t", value: 1, texture: null }
+	    "tGlow": { type: "t", value: null }
+	  },
+
+	  vertexShader: `
+
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+    }
+
+  `.trim(),
+
+	  fragmentShader:
+	  `
+    uniform sampler2D tDiffuse;
+    uniform sampler2D tGlow;
+    varying vec2 vUv;
+
+    void main() {
+      vec4 origColor = texture2D( tDiffuse, vUv );
+      vec4 glowColor = texture2D( tGlow, vUv );
+      gl_FragColor = origColor + glowColor*3.;
+      // gl_FragColor = glowColor;
     }
 
   `.trim()
@@ -50029,7 +50095,9 @@
 	    // this.addFXAA()
 
 	    // F. BlurShader
-	    this.addBlur();
+	    //this.addBlur()
+
+	    this.addGlow();
 
 
 	    // G. Noise
@@ -50164,14 +50232,57 @@
 	    // blurPassV.renderToScreen = true
 	    this._composer.addPass( blurPassV );
 
-
 	    let blurPassH = new ShaderPass( BlurShader );
 	    blurPassH.uniforms.resolution.value = new Vector2( this._divObj.clientWidth, this._divObj.clientHeight );
 	    blurPassH.uniforms.direction.value = new Vector2( 1, 0 );
 	    blurPassH.renderToScreen = true;
 	    this._composer.addPass( blurPassH );
-
 	  }
+
+
+
+	  addGlow() {
+	    let blurRenderTarget = new WebGLRenderTarget( this._divObj.clientWidth, this._divObj.clientHeight );
+
+
+
+	    let blurComposer = new EffectComposer( this._renderer, blurRenderTarget );
+	    this._blurComposer = blurComposer;
+	    blurComposer.setSize( this._divObj.clientWidth, this._divObj.clientHeight );
+
+	    let blurBaseRenderPass = new RenderPass( this._scene, this._camera );
+	    blurComposer.addPass( blurBaseRenderPass );
+
+	    let blurPassV = new ShaderPass( BlurShader );
+	    blurPassV.uniforms.resolution.value = new Vector2( this._divObj.clientWidth, this._divObj.clientHeight );
+	    blurPassV.uniforms.direction.value = new Vector2( 0, 1 );
+	    // blurPassV.renderToScreen = true
+	    blurComposer.addPass( blurPassV );
+
+	    let blurPassH = new ShaderPass( BlurShader );
+	    blurPassH.uniforms.resolution.value = new Vector2( this._divObj.clientWidth, this._divObj.clientHeight );
+	    blurPassH.uniforms.direction.value = new Vector2( 1, 0 );
+	    //blurPassH.renderToScreen = true
+	    blurComposer.addPass( blurPassH );
+
+	    // blending with the original (unblured) scene
+	    let mergeBaseRenderPass = new RenderPass( this._scene, this._camera );
+	    this._composer.addPass( mergeBaseRenderPass );
+
+	    let mergerPass = new ShaderPass( MergerShader );
+	    mergerPass.uniforms.tGlow.value = blurComposer.renderTarget2;
+	    mergerPass.renderToScreen = true;
+	    this._composer.addPass( mergerPass );
+
+
+	    // let noisePass = new ShaderPass( NoiseShader )
+	    // noisePass.uniforms.resolution.value = new THREE.Vector2( this._divObj.clientWidth, this._divObj.clientHeight )
+	    // noisePass.renderToScreen = true
+	    // this._composer.addPass( noisePass )
+	  }
+
+
+
 
 
 	  addNoise() {
@@ -50260,6 +50371,8 @@
 	   */
 	  _render() {
 	    //this._renderer.render(this._scene, this._camera)
+	    if("_blurComposer" in this)
+	      this._blurComposer.render();
 	    this._composer.render();
 	  }
 

@@ -9,7 +9,7 @@
  * @param  {Boolean} boostEnergy - will compensate for energy loss if true
  * @return {Float32Array} the 1D gaussian kernel
  */
-function gaussian(size, sigma = 1., boostEnergy=true) {
+function gaussian(size=9, sigma = 1., boostEnergy=true) {
   let energyLossTolerance = 1e-2
   let mu = 0.
 
@@ -61,6 +61,34 @@ function compensateLostEnergy(kernel){
 
 
 /**
+ * The gaussian kernel can be made a lot smaller by leveraging GPU linear interpolation
+ * of textures. All is explned here:
+ * http://rastergrid.com/blog/2010/09/efficient-gaussian-blur-with-linear-sampling/
+ * @param  {Array} kernel - the gaussian kernel
+ * @return {Array} the reduced gaussian kernel
+ */
+function reduceKernel(kernel) {
+  let halfSize = ~~(kernel.length / 2)
+  let halfKernel = kernel.slice(halfSize)
+
+  let offsets = [0]
+  let weights = [halfKernel[0]]
+
+  for (let i=1; i<halfKernel.length-1; i+=2) {
+    let w = halfKernel[i] + halfKernel[i+1]
+    let offset = (i * halfKernel[i] + (i + 1) * halfKernel[i+1]) / w
+    weights.push(w)
+    offsets.push(offset)
+  }
+
+  return {
+    weights: weights,
+    offsets: offsets
+  }
+}
+
+
+/**
  * Makes a GLSL gaussian blur function of a desired kernel size with a desired
  * standard deviation. Note that the generated GLSLS function is made to be double
  * pass (one vertical, one horizontal) as the generated kernel is single dimensional.
@@ -70,7 +98,7 @@ function compensateLostEnergy(kernel){
  * @param {String} functionName - name the GLSL function will have once generated
  * @return {String} The GLSL bluring function
  */
-function makeCustomBlurShaderFunction(size = 13, sigma = 1, functionName = 'blur') {
+function makeCustomBlurShaderFunction(size = 9, sigma = 1, functionName = 'blur') {
   let {kernel, energyLost} = gaussian(size, sigma)
 
   let shaderFunction = `vec4 ${functionName}(sampler2D image, vec2 uv, vec2 resolution, vec2 direction) {\n`
@@ -93,4 +121,40 @@ function makeCustomBlurShaderFunction(size = 13, sigma = 1, functionName = 'blur
   return shaderFunction
 }
 
-export default makeCustomBlurShaderFunction
+
+function makeFastBlurShaderFunction(size = 9, sigma = 1, functionName = 'blur') {
+  let {kernel, energyLost} = gaussian(size, sigma)
+  let {weights, offsets} = reduceKernel(kernel)
+
+  let shaderFunction = `vec4 ${functionName}(sampler2D image, vec2 uv, vec2 resolution, vec2 direction) {\n`
+  shaderFunction += `\tvec4 color = vec4(0.0);\n`
+  shaderFunction += `\tvec2 step = direction / resolution;\n`
+  // adding the central weight
+  shaderFunction += `\tcolor += texture2D(image, uv) * ${weights[0]};\n`
+
+  for(let i=1; i<weights.length; i++) {
+    shaderFunction += `\tvec2 offset${i} = step * ${offsets[i]};\n`
+    shaderFunction += `\tcolor += texture2D(image, uv + offset${i}) * ${weights[i]};\n`
+    shaderFunction += `\tcolor += texture2D(image, uv - offset${i}) * ${weights[i]};\n`
+  }
+
+  shaderFunction += `\treturn color;\n`
+  shaderFunction += `}\n`
+  return shaderFunction
+}
+
+// let kdata = gaussian()
+// console.log(kdata)
+// let rk = reduceKernel(kdata.kernel)
+// console.log(rk)
+
+// let s1 = makeCustomBlurShaderFunction()
+// console.log(s1);
+
+
+// let s2 = makeFastBlurShaderFunction()
+// console.log(s2);
+
+
+
+export { makeCustomBlurShaderFunction, makeFastBlurShaderFunction }
