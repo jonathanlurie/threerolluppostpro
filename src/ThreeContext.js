@@ -77,7 +77,17 @@ export class ThreeContext extends EventManager {
     this._scene.add(this._camera)
     this._camera.add(light1)
 
-    this._renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true })
+    let canvas = document.createElement('canvas')
+    divObj.appendChild(canvas)
+    let context = canvas.getContext('webgl2')
+
+    this._renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      alpha: true,
+      preserveDrawingBuffer: true,
+      canvas: canvas,
+      context: context
+    })
     this._renderer.setClearColor(0xffffff, 0)
     this._renderer.setPixelRatio(window.devicePixelRatio)
     this._renderer.setSize(divObj.clientWidth, divObj.clientHeight)
@@ -108,9 +118,9 @@ export class ThreeContext extends EventManager {
     // this.addFXAA()
 
     // F. BlurShader
-    //this.addBlur()
+    this.addBlur()
 
-    this.addGlow()
+    //this.addGlow()
 
 
     // G. Noise
@@ -238,6 +248,8 @@ export class ThreeContext extends EventManager {
   addBlur() {
     let renderPass = new RenderPass( this._scene, this._camera )
     this._composer.addPass( renderPass )
+
+    console.log(this._divObj.clientWidth, this._divObj.clientHeight)
 
     let blurPassV = new ShaderPass( BlurShader )
     blurPassV.uniforms.resolution.value = new THREE.Vector2( this._divObj.clientWidth, this._divObj.clientHeight )

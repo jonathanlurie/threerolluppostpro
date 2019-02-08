@@ -49838,42 +49838,32 @@
 	  },
 
 	  vertexShader: `
-
-    varying vec2 vUv;
-    void main() {
-      vUv = uv;
-      gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
-    }
+  #version 300 es
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+  }
 
   `.trim(),
 
 	  fragmentShader:
-	   makeFastBlurShaderFunction(27, 6) +
 	  `
-  vec4 blur13(sampler2D image, vec2 uv, vec2 resolution, vec2 direction) {
-    vec4 color = vec4(0.0);
-    vec2 off1 = vec2(1.411764705882353) * direction;
-    vec2 off2 = vec2(3.2941176470588234) * direction;
-    vec2 off3 = vec2(5.176470588235294) * direction;
-    color += texture2D(image, uv) * 0.1964825501511404;
-    color += texture2D(image, uv + (off1 / resolution)) * 0.2969069646728344;
-    color += texture2D(image, uv - (off1 / resolution)) * 0.2969069646728344;
-    color += texture2D(image, uv + (off2 / resolution)) * 0.09447039785044732;
-    color += texture2D(image, uv - (off2 / resolution)) * 0.09447039785044732;
-    color += texture2D(image, uv + (off3 / resolution)) * 0.010381362401148057;
-    color += texture2D(image, uv - (off3 / resolution)) * 0.010381362401148057;
-    return color;
-    }
+  #version 300 es
 
-    uniform vec2 resolution;
-    uniform vec2 direction;
-    uniform sampler2D tDiffuse;
-    varying vec2 vUv;
+  out vec4 out_FragColor;
 
-    void main() {
-      vec4 color = blur(tDiffuse, vUv, resolution, direction);
-      gl_FragColor = color;
-    }
+  ${makeFastBlurShaderFunction(51, 10)}
+
+  uniform vec2 resolution;
+  uniform vec2 direction;
+  uniform sampler2D tDiffuse;
+  varying vec2 vUv;
+
+  void main() {
+    vec4 color = blur(tDiffuse, vUv, resolution, direction);
+    out_FragColor = color;
+  }
 
   `.trim()
 
@@ -50064,7 +50054,17 @@
 	    this._scene.add(this._camera);
 	    this._camera.add(light1);
 
-	    this._renderer = new WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+	    let canvas = document.createElement('canvas');
+	    divObj.appendChild(canvas);
+	    let context = canvas.getContext('webgl2');
+
+	    this._renderer = new WebGLRenderer({
+	      antialias: true,
+	      alpha: true,
+	      preserveDrawingBuffer: true,
+	      canvas: canvas,
+	      context: context
+	    });
 	    this._renderer.setClearColor(0xffffff, 0);
 	    this._renderer.setPixelRatio(window.devicePixelRatio);
 	    this._renderer.setSize(divObj.clientWidth, divObj.clientHeight);
@@ -50095,9 +50095,9 @@
 	    // this.addFXAA()
 
 	    // F. BlurShader
-	    //this.addBlur()
+	    this.addBlur();
 
-	    this.addGlow();
+	    //this.addGlow()
 
 
 	    // G. Noise
@@ -50225,6 +50225,8 @@
 	  addBlur() {
 	    let renderPass = new RenderPass( this._scene, this._camera );
 	    this._composer.addPass( renderPass );
+
+	    console.log(this._divObj.clientWidth, this._divObj.clientHeight);
 
 	    let blurPassV = new ShaderPass( BlurShader );
 	    blurPassV.uniforms.resolution.value = new Vector2( this._divObj.clientWidth, this._divObj.clientHeight );
